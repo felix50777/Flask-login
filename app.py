@@ -1,13 +1,18 @@
-from flask import Flask, render_template, redirect, url_for, request
+import os
+from flask import Flask, render_template, redirect, url_for, request, flash
+from werkzeug.utils import secure_filename
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import LoginManager, UserMixin, login_user, login_required, logout_user, current_user
 from flask_bcrypt import Bcrypt
 
 # Configuración de la aplicación Flask
 app = Flask(__name__)
-# Base de datos SQLite
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///users.db'
-app.config['SECRET_KEY'] = 'clave_secreta'  # Clave para manejar sesiones
+app.config['SECRET_KEY'] = 'clave_secreta'
+
+# Configuración para subir archivos
+app.config['UPLOAD_FOLDER'] = 'uploads'
+ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'mp4', 'avi', 'mov'}
 
 # Inicialización de la base de datos y seguridad
 db = SQLAlchemy(app)
@@ -31,16 +36,79 @@ class User(db.Model, UserMixin):
 def load_user(user_id):
     return User.query.get(int(user_id))
 
-# Redirigir la página principal al login
+# Ruta principal que redirige al login
 
 
 @app.route('/')
-def index():
+def home():
     return redirect(url_for('login'))
+
+# Ruta para el login
+
+
+@app.route('/login', methods=['GET', 'POST'])
+def login():
+    if request.method == 'POST':
+        username = request.form.get('username')
+        password = request.form.get('password')
+        user = User.query.filter_by(username=username).first()
+
+        if user and bcrypt.check_password_hash(user.password, password):
+            login_user(user)
+            # <-- Mensaje de depuración
+            print(f"✅ Usuario autenticado: {user.username}")
+            return redirect(url_for('dashboard'))
+        else:
+            flash("Usuario o contraseña incorrectos", "danger")
+            # Redirigir limpia los mensajes duplicados
+            print("❌ Error de autenticación")  # <-- Mensaje si fallA
+            return redirect(url_for('login'))
+
+    return render_template('login.html')
+
+
+@app.route('/dashboard', methods=['GET', 'POST'])
+@login_required
+def dashboard():
+    if request.method == 'POST':
+        if 'file' not in request.files:
+            flash("No se seleccionó ningún archivo", "danger")
+            return redirect(request.url)
+
+        file = request.files['file']
+        if file.filename == '':
+            flash("Nombre de archivo inválido", "danger")
+            return redirect(request.url)
+
+        if file and allowed_file(file.filename):
+            filename = secure_filename(file.filename)
+            file.save(os.path.join(app.config['UPLOAD_FOLDER'], filename))
+            flash("Archivo subido con éxito", "success")
+
+    return render_template('dashboard.html', username=current_user.username)
+
+# Ruta para el logout
+
+
+@app.route('/logout')
+@login_required
+def logout():
+    logout_user()
+    return redirect(url_for('login'))
+
+# Función para verificar extensiones de archivos
+
+
+def allowed_file(filename):
+    return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+
+# Ruta protegida (dashboard) con subida de archivos
+
 
 # Ruta para el registro de usuarios
 
 
+# Ruta para el registro de usuarios
 @app.route('/register', methods=['GET', 'POST'])
 def register():
     if request.method == 'POST':
@@ -69,46 +137,9 @@ def register():
 
     return render_template('register.html')
 
-# Ruta para el login
-
-
-@app.route('/login', methods=['GET', 'POST'])
-def login():
-    if request.method == 'POST':
-        username = request.form['username']
-        password = request.form['password']
-        user = User.query.filter_by(username=username).first()
-
-        if user and bcrypt.check_password_hash(user.password, password):
-            login_user(user)
-            return redirect(url_for('dashboard'))
-        else:
-            return render_template('login.html', error="Usuario o contraseña incorrectos")
-
-    return render_template('login.html')
-
-# Ruta protegida (dashboard)
-
-
-@app.route('/dashboard')
-@login_required
-def dashboard():
-    return f"Bienvenido {current_user.username} al Dashboard"
-
-# Ruta para el logout
-
-
-@app.route('/logout')
-@login_required
-def logout():
-    logout_user()
-    return redirect(url_for('login'))
-
-
-# Crear la base de datos si no existe
-with app.app_context():
-    db.create_all()
 
 # Ejecutar la aplicación
 if __name__ == '__main__':
+    if not os.path.exists("uploads"):
+        os.makedirs("uploads")
     app.run(debug=True)
