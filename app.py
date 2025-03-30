@@ -6,6 +6,8 @@ from flask_sqlalchemy import SQLAlchemy
 from flask_login import LoginManager, UserMixin, login_user, login_required, logout_user, current_user
 from flask_bcrypt import Bcrypt
 from flask import send_from_directory
+from flask_migrate import Migrate
+
 
 # Configuración de la aplicación Flask
 app = Flask(__name__)
@@ -18,6 +20,7 @@ ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'mp4', 'avi', 'mov'}
 
 # Inicialización de la base de datos y seguridad
 db = SQLAlchemy(app)
+migrate = Migrate(app, db)  # Inicializamos Flask-Migrate
 bcrypt = Bcrypt(app)
 
 # Configuración de Flask-Login
@@ -32,6 +35,8 @@ class User(db.Model, UserMixin):
     id = db.Column(db.Integer, primary_key=True)
     username = db.Column(db.String(150), unique=True, nullable=False)
     password = db.Column(db.String(150), nullable=False)
+    role = db.Column(db.String(50), nullable=False,
+                     default="cliente")  # Nuevo campo
 
 
 @login_manager.user_loader
@@ -80,6 +85,10 @@ def login():
 @app.route('/dashboard', methods=['GET', 'POST'])
 @login_required
 def dashboard():
+    if current_user.role != "vendedor":
+        flash("No tienes permisos para acceder al panel de vendedor", "danger")
+        return redirect(url_for('catalogo'))
+
     if request.method == 'POST':
         if 'file' not in request.files:
             flash("No se seleccionó ningún archivo", "danger")
@@ -98,21 +107,17 @@ def dashboard():
             filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
             file.save(filepath)
 
-            # Guardar en la base de datos
             new_product = Product(
-                image_filename=filename,  # Corrección: usa image_filename
+                image_filename=filename,
                 description=description,
                 price=price,
                 user_id=current_user.id
             )
             db.session.add(new_product)
             db.session.commit()
-
             flash("Producto subido con éxito", "success")
 
-    # Obtener todos los productos del usuario actual
     products = Product.query.filter_by(user_id=current_user.id).all()
-
     return render_template('dashboard.html', username=current_user.username, products=products)
 
 
@@ -208,6 +213,7 @@ def register():
         username = request.form['username']
         password = request.form['password']
         confirm_password = request.form['confirm_password']
+        role = request.form['role']  # Nuevo campo
 
         # Verificar si las contraseñas coinciden
         if password != confirm_password:
@@ -221,7 +227,7 @@ def register():
         # Hashear la contraseña y guardar el usuario
         hashed_password = bcrypt.generate_password_hash(
             password).decode('utf-8')
-        new_user = User(username=username, password=hashed_password)
+        new_user = User(username=username, password=hashed_password, role=role)
         db.session.add(new_user)
         db.session.commit()
 
